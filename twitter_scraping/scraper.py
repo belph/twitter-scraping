@@ -10,7 +10,6 @@ from io import open
 from tweepy.models import Model
 
 from .auth import get_auth
-from . import email
 
 _LOG = logging.getLogger('scraper')
 fmt = logging.Formatter("[%(levelname)s] %(name)s (%(asctime)s) - %(message)s")
@@ -22,20 +21,59 @@ ch.setFormatter(fmt)
 _LOG.addHandler(ch)
 _LOG.setLevel(logging.INFO)
 
+class _ElapsedTime(object):
+    def __init__(self, total_seconds):
+        self._total_seconds = total_seconds
+
+    @property
+    def total_seconds(self):
+        return self._total_seconds
+
+    @property
+    def seconds(self):
+        return int(self._total_seconds % 60)
+
+    @property
+    def minutes(self):
+        return int((self._total_seconds / 60) % 60)
+
+    @property
+    def hours(self):
+        return int((self._total_seconds / 3600) % 24)
+
+    @property
+    def days(self):
+        return int(self._total_seconds / 86400)
+
+    def format(self, fmt):
+        return fmt.format(
+            days=self.days,
+            hours=self.hours,
+            minutes=self.minutes,
+            seconds=self.seconds,
+            total_seconds=self.total_seconds,
+            total_seconds_int=int(self.total_seconds))
+    
+    def __str__(self):
+        return self.format("{days}d{hours}h{minutes}m{seconds}s [{total_seconds_int}s]")
+
 class ScraperStreamListener(tweepy.StreamListener):
-    def __init__(self, output_file, notify_count=None, notify_frequency=None, *args, **kwargs):
+    def __init__(self, output_file, emailer=None, notify_count=None, notify_frequency=None, *args, **kwargs):
         super(ScraperStreamListener, self).__init__(*args, **kwargs)
-        self._emailer = email.Emailer()
+        self._emailer = emailer
         self._output = open(output_file, "w", encoding="utf-8")
         self._cache = LRUCache(maxsize=1000)
         self._num_written = 0
+        self._log_frequency = 60 * 15 # Write log message every 15min
         self._notify_frequency = notify_frequency
         self._notify_count = notify_count
         self._start = time.time()
         self._last_notification = time.time()
         self._last_notification_count = 0
+        self._last_log_notification = time.time()
         self._rate_limit_errors = 0
         self._other_errors = 0
+        self._milestone_size = 1000000
         _LOG.info("Starting collection.")
 
     def on_error(self, status_code):
@@ -60,28 +98,37 @@ class ScraperStreamListener(tweepy.StreamListener):
 
     @property
     def elapsed(self):
-        return time.time() - self._start
+        return _ElapsedTime(time.time() - self._start)
+
+    @property
+    def next_milestone(self):
+        return (int(self._num_written / self._milestone_size) + 1) * self._milestone_size
     
-    def notify(self):
-        self._last_notification = time.time()
-        self._last_notifiaction_count = self._num_written
+    def notify(self, send_email=False):
+        self._last_log_notification = time.time()
         elapsed = self.elapsed
-        rate = (self._num_written / float(elapsed)) * 60
-        seconds = int(elapsed % 60)
-        minutes = int((elapsed / 60) % 60)
-        hours = int((elapsed / 3600) % 24)
-        days = int(elapsed / (3600 * 24))
-        message = "{} tweets have been collected so far (time elapsed: {}d{}h{}m{}s). The collection rate is an average of {} tweets/min.".format(self._num_written, days, hours, minutes, seconds, rate)
-        _LOG.info("Sending notification: {}".format(message))
-        self._emailer.send_text(message=message)
+        next_milestone = self.next_milestone
+        remaining_to_milestone = next_milestone - self._num_written
+        rate = self._num_written / float(elapsed.total_seconds)
+        eta = _ElapsedTime(remaining_to_milestone / rate)
+        message = "{:,} tweets have been collected so far (time elapsed: {}). The collection rate is an average of {} tweets/min. ETA to {:,} tweets: {}".format(self._num_written, elapsed, rate * 60, next_milestone, eta)
+        _LOG.info(message)
+        if send_email:
+            self._last_notification = time.time()
+            self._last_notifiaction_count = self._num_written
+            self._emailer.send_text(message=message)
 
     def notify_if_needed(self):
+        send_email = False
         if self._notify_count is not None \
            and self._num_written % self._notify_count == 0 \
            and self._num_written != self._last_notification_count:
-            self.notify()
+            send_email = True
         elif self._notify_frequency is not None and time.time() - self._last_notification >= self._notify_frequency:
-            self.notify()
+            send_email = True
+
+        if send_email or time.time() - self._last_log_notification > self._log_frequency:
+            self.notify(send_email=send_email)
 
     def on_status(self, status):
         self._rate_limit_errors = 0
@@ -115,6 +162,7 @@ class ScraperBuilder(object):
         self._output_file = None
         self._notify_count = None
         self._notify_seconds = None
+        self._emailer = None
 
     @classmethod
     def load_config(cls, config_file):
@@ -133,7 +181,8 @@ class ScraperBuilder(object):
         if self._output_file is None:
             print("Output file is required.")
             sys.exit(1)
-        with ScraperStreamListener(output_file=self._output_file,
+        with ScraperStreamListener(emailer=self._emailer,
+                                   output_file=self._output_file,
                                    notify_frequency=self._notify_seconds,
                                    notify_count=self._notify_count) as listener:
             auth = get_auth()
@@ -192,6 +241,10 @@ class ScraperBuilder(object):
     def notify_seconds(self, notify_seconds):
         assert notify_seconds is None or notify_seconds > 0, "notify_seconds must be greater than zero"
         self._notify_seconds = notify_seconds
+        return self
+
+    def emailer(self, emailer):
+        self._emailer = emailer
         return self
 
 

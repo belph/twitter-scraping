@@ -7,9 +7,11 @@ from email.parser import Parser
 
 from .auth import get_gmail_info
 
+_DEFAULT_DEFAULT_SUBJECT = "Message from twitter-scraping"
+
 class Emailer(object):
     def __init__(self, default_subject=None):
-        self._default_subject = default_subject or "Message from twitter-scraping"
+        self._default_subject = default_subject or _DEFAULT_DEFAULT_SUBJECT
         credentials = get_gmail_info()
         self.email = credentials['username']
         self.password = credentials['password']
@@ -23,7 +25,7 @@ class Emailer(object):
         self._default_subject = subject
 
     @contextlib.contextmanager
-    def server_connection(self):
+    def _server_connection(self):
         server = smtplib.SMTP_SSL("smtp.gmail.com")
         try:
             server.login(self.email, self.password)
@@ -32,7 +34,7 @@ class Emailer(object):
             server.quit()
     
     def send_message(self, message, subject=None):
-        with self.server_connection() as server:
+        with self._server_connection() as server:
             # Allow passing of template strings as subject
             message['Subject'] = (subject or self.default_subject).format(default_subject=self.default_subject)
             message['From'] = self.email
@@ -42,3 +44,13 @@ class Emailer(object):
     def send_text(self, message, subject=None):
         self.send_message(Parser().parsestr(message), subject=subject)
 
+
+class DummyEmailer(object):
+    def __init__(self, default_subject=None):
+        self.default_subject = default_subject or _DEFAULT_DEFAULT_SUBJECT
+
+    def send_message(self, message, subject=None):
+        pass
+
+    def send_text(self, message, subject=None):
+        pass

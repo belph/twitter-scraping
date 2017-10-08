@@ -1,4 +1,7 @@
 import argparse
+import sys
+
+from . import email
 from . import scraper
 def twitter_scraping():
     parser = argparse.ArgumentParser(description="Run a twitter scraper")
@@ -11,6 +14,7 @@ def twitter_scraping():
     parser.add_argument('-m', '--minutes', type=int, help="Notification frequency (in minutes)")
     parser.add_argument('--hours', type=int, help="Notification frequency (in hours)")
     parser.add_argument('-n', '--notify-every', type=int, help="Notification frequency (in tweets)", dest='notify_count')
+    parser.add_argument('--no-email', action='store_false', help="Disable emailing", dest='email')
 
     args = parser.parse_args()
 
@@ -35,6 +39,20 @@ def twitter_scraping():
         builder = builder.track(args.track)
     if args.language is not None:
         builder = builder.languages(args.language)
-    with builder.build() as s:
-        # Context manages things like files
-        pass
+    if args.email:
+        emailer = email.Emailer()
+    else:
+        emailer = email.DummyEmailer()
+    try:
+        with builder.emailer(emailer).build() as s:
+            # Context manages things like files
+            pass
+    except Exception as e:
+        if isinstance(e, KeyboardInterrupt):
+            sys.exit(1)
+        import traceback
+        errmsg = "Exception was raised during run:\n{}".format(traceback.format_exc(e))
+        scraper._LOG.error(errmsg)
+        emailer.send_text(message="The run ended in failure:\n{}".format(errmsg),
+                          subject="[ERROR] {default_subject}")
+        sys.exit(1)
