@@ -101,8 +101,11 @@ def get_auth():
     if prompted_any and _prompt_yes_no("Save configuration to a file for future use?", default=True):
         if not os.path.exists(os.path.dirname(_CONFIG_FILE)):
             os.makedirs(os.path.dirname(_CONFIG_FILE))
+        file_already_existed = os.path.exists(_CONFIG_FILE)
         with open(_CONFIG_FILE, "w") as f:
             f.write(json.dumps(cfg))
+        if not file_already_existed:
+            os.chmod(_CONFIG_FILE, 0o600)
         _LOG.info("Authentication information written to configuration: {}".format(_CONFIG_FILE))
     auth = tweepy.OAuthHandler(cfg['key'], cfg['secret'])
     auth.set_access_token(cfg['access_token'], cfg['access_token_secret'])
@@ -128,8 +131,11 @@ def get_gmail_info():
         cfg['password'] = getpass.getpass("Gmail password: ")
         prompted_any = True
     if prompted_any and _prompt_yes_no("Save credentials to a file for future use?", default=True):
+        file_already_existed = os.path.exists(_GMAIL_CONFIG)
         with open(_GMAIL_CONFIG, "w") as f:
             f.write(json.dumps(cfg))
+        if not file_already_existed:
+            os.chmod(_GMAIL_CONFIG, 0o600)
         _LOG.info("Gmail information written to file: {}".format(_GMAIL_CONFIG))
     __GMAIL = cfg
     return cfg
