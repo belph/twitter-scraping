@@ -13,7 +13,7 @@ with open('twitter_scraping/__init__.py', 'r') as f:
 with open('README.rst', 'r', encoding='utf-8') as f:
     readme = f.read()
 
-REQUIRES = ['cachetools', 'six', 'tweepy']
+REQUIRES = ['boto3', 'cachetools', 'six', 'tweepy']
 
 setup(
     name='twitter-scraping',

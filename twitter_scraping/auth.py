@@ -1,3 +1,4 @@
+import boto3
 import getpass
 import json
 import logging
@@ -5,6 +6,7 @@ import os
 import tweepy
 
 from six.moves import input
+from .utils import prompt_yes_no, prompt_nonempty
 
 _LOG = logging.getLogger('auth')
 _LOG.setLevel(logging.INFO)
@@ -15,50 +17,9 @@ _LOG.addHandler(ch)
 _TWITTER_CONFIG = os.path.expanduser("~/.twitter-scraping/twitter-credentials")
 _GMAIL_CONFIG = os.path.expanduser('~/.twitter-scraping/gmail-credentials')
 
-_USE_DEFAULT = object()
 
 __AUTH = None
 __GMAIL = None
-
-def _prompt_yes_no(msg, default=None):
-    if default is None:
-        default_msg = ""
-    elif default:
-        default_msg = " [Y]"
-    else:
-        default_msg = " [N]"
-    prompt = "{}{}: ".format(msg, default_msg)
-    err_msg = "Please input Y or N."
-    while True:
-        resp = input(prompt).strip().lower()
-        if len(resp) > 0:
-            if resp[0] == "y":
-                return True
-            elif resp[0] == "n":
-                return False
-            else:
-                print(err_msg)
-        elif default is not None:
-            return default
-        else:
-            print(err_msg)
-
-
-def _prompt_nonempty(msg, default=_USE_DEFAULT):
-    if default is _USE_DEFAULT:
-        default_msg = ""
-    else:
-        default_msg = " [default: {}]".format(default)
-    prompt = "{}{}: ".format(msg, default_msg)
-    err_msg = "Input is required."
-    while True:
-        resp = input(prompt).strip()
-        if len(resp) > 0:
-            return resp
-        elif default is not _USE_DEFAULT:
-            return default
-        else:
-            print(err_msg)
 
 
 def get_auth():
@@ -87,18 +48,18 @@ def get_auth():
         cfg = {}
     prompted_any = False
     if 'key' not in cfg:
-        cfg['key'] = _prompt_nonempty("Twitter consumer key")
+        cfg['key'] = prompt_nonempty("Twitter consumer key")
         prompted_any = True
     if 'secret' not in cfg:
-        cfg['secret'] = _prompt_nonempty("Twitter consumer secret")
+        cfg['secret'] = prompt_nonempty("Twitter consumer secret")
         prompted_any = True
     if 'access_token' not in cfg:
-        cfg['access_token'] = _prompt_nonempty("Twitter access token")
+        cfg['access_token'] = prompt_nonempty("Twitter access token")
         prompted_any = True
     if 'access_token_secret' not in cfg:
-        cfg['access_token_secret'] = _prompt_nonempty("Twitter access token secret")
+        cfg['access_token_secret'] = prompt_nonempty("Twitter access token secret")
         prompted_any = True
-    if prompted_any and _prompt_yes_no("Save configuration to a file for future use?", default=True):
+    if prompted_any and prompt_yes_no("Save configuration to a file for future use?", default=True):
         if not os.path.exists(os.path.dirname(_TWITTER_CONFIG)):
             os.makedirs(os.path.dirname(_TWITTER_CONFIG))
         file_already_existed = os.path.exists(_TWITTER_CONFIG)
@@ -124,13 +85,13 @@ def get_gmail_info():
         cfg = {}
     prompted_any = False
     if 'username' not in cfg:
-        cfg['username'] = _prompt_nonempty("Gmail username")
+        cfg['username'] = prompt_nonempty("Gmail username")
         prompted_any = True
     if 'password' not in cfg:
         # This is of course an application-specific password
         cfg['password'] = getpass.getpass("Gmail password: ")
         prompted_any = True
-    if prompted_any and _prompt_yes_no("Save credentials to a file for future use?", default=True):
+    if prompted_any and prompt_yes_no("Save credentials to a file for future use?", default=True):
         if not os.path.exists(os.path.dirname(_GMAIL_CONFIG)):
             os.makedirs(os.path.dirname(_GMAIL_CONFIG))
         file_already_existed = os.path.exists(_GMAIL_CONFIG)
@@ -141,3 +102,7 @@ def get_gmail_info():
         _LOG.info("Gmail information written to file: {}".format(_GMAIL_CONFIG))
     __GMAIL = cfg
     return cfg
+
+def check_boto_credentials():
+    if boto3.Session().get_credentials() is None:
+        raise RuntimeError("Failed to find AWS credentials. Please set up boto3 credentials before using: https://boto3.readthedocs.io/en/latest/guide/configuration.html")

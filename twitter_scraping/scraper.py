@@ -10,6 +10,7 @@ from io import open
 from tweepy.models import Model
 
 from .auth import get_auth
+from .file_utils import ShardedFileWriter
 
 _LOG = logging.getLogger('scraper')
 fmt = logging.Formatter("[%(levelname)s] %(name)s (%(asctime)s) - %(message)s")
@@ -58,13 +59,16 @@ class _ElapsedTime(object):
         return self.format("{days}d{hours}h{minutes}m{seconds}s [{total_seconds_int}s]")
 
 class ScraperStreamListener(tweepy.StreamListener):
-    def __init__(self, output_file, emailer=None, notify_count=None, notify_frequency=None, *args, **kwargs):
+    def __init__(self, output_dir, s3_bucket=None, s3_root=None, emailer=None, notify_count=None, notify_frequency=None, shard_max=50000, *args, **kwargs):
         super(ScraperStreamListener, self).__init__(*args, **kwargs)
         self._emailer = emailer
-        self._output = open(output_file, "w", encoding="utf-8")
+        self._output = ShardedFileWriter(output_dir, "tweets-shard-{n}.json")
+        self._output.next_shard()
+        if s3_bucket is not None:
+            self._output.offload_to_s3(s3_bucket, s3_root=s3_root)
         self._cache = LRUCache(maxsize=1000)
         self._num_written = 0
-        self._log_frequency = 60 * 15 # Write log message every 15min
+        self._log_frequency = 3600 # Write log message every 60min
         self._notify_frequency = notify_frequency
         self._notify_count = notify_count
         self._start = time.time()
@@ -74,6 +78,8 @@ class ScraperStreamListener(tweepy.StreamListener):
         self._rate_limit_errors = 0
         self._other_errors = 0
         self._milestone_size = 1000000
+        self._shard_max = shard_max
+        self._last_shard = 0 # <- should be unneeded, but let's play it safe
         _LOG.info("Starting collection.")
 
     def on_error(self, status_code):
@@ -103,6 +109,10 @@ class ScraperStreamListener(tweepy.StreamListener):
     @property
     def next_milestone(self):
         return (int(self._num_written / self._milestone_size) + 1) * self._milestone_size
+
+    @property
+    def num_in_shard(self):
+        return self._num_written - self._last_shard
     
     def notify(self, send_email=False):
         self._last_log_notification = time.time()
@@ -130,6 +140,11 @@ class ScraperStreamListener(tweepy.StreamListener):
         if send_email or time.time() - self._last_log_notification > self._log_frequency:
             self.notify(send_email=send_email)
 
+    def shard_if_needed(self):
+        if self.num_in_shard >= self._shard_max:
+            self._last_shard = self._num_written
+            self._output.next_shard()
+
     def on_status(self, status):
         self._rate_limit_errors = 0
         self._other_errors = 0
@@ -142,6 +157,7 @@ class ScraperStreamListener(tweepy.StreamListener):
             self._output.write("\n")
             self._num_written += 1
         self.notify_if_needed()
+        self.shard_if_needed()
 
     def __enter__(self):
         return self
@@ -151,6 +167,7 @@ class ScraperStreamListener(tweepy.StreamListener):
 
 class ScraperBuilder(object):
     def __init__(self):
+        self._ignore_none = False
         self._follow = None
         self._track = None
         self._async = False
@@ -159,10 +176,13 @@ class ScraperBuilder(object):
         self._languages = None
         self._encoding = 'utf8'
         self._filter_level = None
-        self._output_file = None
+        self._output_dir = None
         self._notify_count = None
         self._notify_seconds = None
         self._emailer = None
+        self._s3_bucket = None
+        self._s3_root = None
+        self._shard_max = 50000
 
     @classmethod
     def load_config(cls, config_file):
@@ -178,11 +198,14 @@ class ScraperBuilder(object):
         if all(x is None for x in [self._follow, self._track, self._locations]):
             print("'follow', 'track' or 'locations' is required.")
             sys.exit(1)
-        if self._output_file is None:
+        if self._output_dir is None:
             print("Output file is required.")
             sys.exit(1)
         with ScraperStreamListener(emailer=self._emailer,
-                                   output_file=self._output_file,
+                                   s3_bucket=self._s3_bucket,
+                                   s3_root=self._s3_root,
+                                   shard_max=self._shard_max,
+                                   output_dir=self._output_dir,
                                    notify_frequency=self._notify_seconds,
                                    notify_count=self._notify_count) as listener:
             auth = get_auth()
@@ -197,54 +220,87 @@ class ScraperBuilder(object):
                 encoding=self._encoding,
                 filter_level=self._filter_level)
 
+    def ignore_none(self, ignore_none=True):
+        self._ignore_none = ignore_none
+        return self
+
     def follow(self, follow):
-        self._follow = follow
+        if not self._ignore_none or follow is not None:
+            self._follow = follow
         return self
 
     def track(self, track):
-        self._track = track
+        if not self._ignore_none or track is not None:
+            self._track = track
         return self
 
     def async(self, async):
-        self._async = async
+        if not self._ignore_none or async is not None:
+            self._async = async
         return self
 
     def locations(self, locations):
-        self._locations = locations
+        if not self._ignore_none or locations is not None:
+            self._locations = locations
         return self
 
     def stall_warnings(self, stall_warnings):
-        self._stall_warnings = stall_warnings
+        if not self._ignore_none or stall_warnings is not None:
+            self._stall_warnings = stall_warnings
         return self
 
     def languages(self, languages):
-        self._languages = languages
+        if not self._ignore_none or languages is not None:
+            self._languages = languages
         return self
 
     def encoding(self, encoding):
-        self._encoding = encoding
+        if not self._ignore_none or encoding is not None:
+            self._encoding = encoding
         return self
 
     def filter_level(self, filter_level):
-        self._filter_level = filter_level
+        if not self._ignore_none or filter_level is not None:
+            self._filter_level = filter_level
         return self
 
-    def output_file(self, output_file):
-        self._output_file = output_file
+    def output_dir(self, output_dir):
+        if not self._ignore_none or output_dir is not None:
+            self._output_dir = output_dir
         return self
 
     def notify_count(self, notify_count):
+        if self._ignore_none and notify_count is None:
+            return self
         assert notify_count is None or notify_count > 0, "notify_count must be greater than zero"
         self._notify_count = notify_count
         return self
 
     def notify_seconds(self, notify_seconds):
+        if self._ignore_none and notify_seconds is None:
+            return self
         assert notify_seconds is None or notify_seconds > 0, "notify_seconds must be greater than zero"
         self._notify_seconds = notify_seconds
         return self
 
     def emailer(self, emailer):
-        self._emailer = emailer
+        if not self._ignore_none or emailer is not None:
+            self._emailer = emailer
+        return self
+
+    def s3_bucket(self, s3_bucket):
+        if not self._ignore_none or s3_bucket is not None:
+            self._s3_bucket = s3_bucket
+        return self
+
+    def s3_root(self, s3_root):
+        if not self._ignore_none or s3_root is not None:
+            self._s3_root = s3_root
+        return self
+
+    def shard_max(self, shard_max):
+        if not self._ignore_none or shard_max is not None:
+            self._shard_max = shard_max
         return self
 
 
