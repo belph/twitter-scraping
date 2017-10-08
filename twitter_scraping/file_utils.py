@@ -6,6 +6,9 @@ import threading
 import time
 
 from .auth import check_boto_credentials
+from .log import get_logger
+
+_LOG = get_logger('file_utils')
 
 @six.add_metaclass(abc.ABCMeta)
 class ShardListener(object):
@@ -33,14 +36,16 @@ class S3FileMover(ShardListener):
 
     def move_file(self, filename):
         dest_filename = os.path.join(self._s3_root, os.path.relpath(filename, self._base_dir))
+        _LOG.info("Uploading file {} to s3://{}:{}".format(filename, self._bucket_name, dest_filename))
         bucket = self._s3.Bucket(self._bucket_name)
         bucket.upload_file(filename, dest_filename)
         obj = self._s3.Object(self._bucket_name, dest_filename)
-        if os.stat(filename).st_size != obj.content_length:
-            # TODO: Log something
-            pass
+        disk_size = os.stat(filename).st_size
+        if disk_size != obj.content_length:
+            _LOG.error("File {} failed to upload to S3! Expected size: {}B; Actual size: {}B. Local copy will not be deleted.".format(filename, disk_size, obj.content_length))
         else:
             # Successfully uploaded. Delete old file
+            _LOG.info("File successfully uploaded (local copy will be deleted): {}".format(filename))
             os.remove(filename)
 
     def handle_shard(self, filename):

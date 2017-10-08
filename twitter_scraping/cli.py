@@ -1,9 +1,12 @@
 import argparse
+import logging
 import sys
 
 from . import email
+from . import log
 from . import scraper
 
+_LOG = log.get_logger('cli')
 
 def twitter_scraping():
     parser = argparse.ArgumentParser(description="Run a twitter scraper")
@@ -19,6 +22,7 @@ def twitter_scraping():
     parser.add_argument('--no-email', action='store_false', help="Disable emailing", dest='email')
     parser.add_argument('--s3-bucket', type=str, help="S3 Bucket to offload data onto", dest='s3_bucket')
     parser.add_argument('--shard-size', type=int, help="Size of sharded data files", dest='shard_max')
+    parser.add_argument('--s3-root', type=str, help="Root prefix on S3 to upload with", dest='s3_root')
 
     args = parser.parse_args()
 
@@ -52,6 +56,7 @@ def twitter_scraping():
               .languages(args.language)\
               .emailer(emailer)\
               .s3_bucket(args.s3_bucket)\
+              .s3_root(args.s3_root)\
               .shard_max(args.shard_max)
     try:
         with builder.build() as s:
@@ -62,7 +67,7 @@ def twitter_scraping():
             sys.exit(1)
         import traceback
         errmsg = "Exception was raised during run:\n{}".format(traceback.format_exc())
-        scraper._LOG.error(errmsg)
+        _LOG.error(errmsg)
         emailer.send_text(message="The run ended in failure:\n{}".format(errmsg),
                           subject="[ERROR] {default_subject}")
         sys.exit(1)

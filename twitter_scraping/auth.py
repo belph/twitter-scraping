@@ -1,19 +1,15 @@
 import boto3
 import getpass
 import json
-import logging
 import os
 import tweepy
 
 from six.moves import input
+from .log import get_logger
 from .utils import prompt_yes_no, prompt_nonempty
 
-_LOG = logging.getLogger('auth')
-_LOG.setLevel(logging.INFO)
-fmt = logging.Formatter("[%(levelname)s] %(name)s (%(asctime)s) - %(message)s")
-ch = logging.StreamHandler()
-ch.setFormatter(fmt)
-_LOG.addHandler(ch)
+_LOG = get_logger('auth')
+
 _TWITTER_CONFIG = os.path.expanduser("~/.twitter-scraping/twitter-credentials")
 _GMAIL_CONFIG = os.path.expanduser('~/.twitter-scraping/gmail-credentials')
 

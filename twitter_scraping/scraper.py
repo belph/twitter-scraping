@@ -1,4 +1,3 @@
-import logging
 import json
 import sys
 import time
@@ -11,16 +10,9 @@ from tweepy.models import Model
 
 from .auth import get_auth
 from .file_utils import ShardedFileWriter
+from .log import get_logger
 
-_LOG = logging.getLogger('scraper')
-fmt = logging.Formatter("[%(levelname)s] %(name)s (%(asctime)s) - %(message)s")
-ch = logging.StreamHandler()
-ch.setFormatter(fmt)
-_LOG.addHandler(ch)
-ch = logging.FileHandler("scraper.log", mode="w")
-ch.setFormatter(fmt)
-_LOG.addHandler(ch)
-_LOG.setLevel(logging.INFO)
+_LOG = get_logger('scraper')
 
 class _ElapsedTime(object):
     def __init__(self, total_seconds):
