@@ -2,6 +2,7 @@ import abc
 import boto3
 import os
 import six
+import threading
 import time
 
 from .auth import check_boto_credentials
@@ -14,6 +15,9 @@ class ShardListener(object):
         """
         pass
 
+    def close(self):
+        pass
+
 class S3FileMover(ShardListener):
     def __init__(self, bucket, base_dir, s3_root=None):
         assert bucket is not None, "Bucket name must not be None."
@@ -22,6 +26,7 @@ class S3FileMover(ShardListener):
         self._bucket_name = bucket
         self._base_dir = base_dir
         self._s3_root = s3_root or time.strftime("run_%Y-%m-%d_%H:%M:%S")
+        self._uploader_threads = []
         if not any(b['Name'] == bucket for b in boto3.client('s3').list_buckets()['Buckets']):
             # Create the bucket if it doesn't exist
             self._s3.create_bucket(self._bucket_name)
@@ -39,7 +44,17 @@ class S3FileMover(ShardListener):
             os.remove(filename)
 
     def handle_shard(self, filename):
-        self.move_file(filename)
+        new_thread = threading.Thread(name='uploader_{}'.format(os.path.basename(filename)),
+                                      target=self.move_file,
+                                      args=(filename,))
+        self._uploader_threads = [t for t in self._uploader_threads if t.is_alive()]
+        self._uploader_threads.append(new_thread)
+        new_thread.start()
+
+    def close(self):
+        for t in self._uploader_threads:
+            if t.is_alive():
+                t.join()
 
 
 class ShardedFileWriter(object):
@@ -73,6 +88,8 @@ class ShardedFileWriter(object):
             if self._listener is not None:
                 self._listener.handle_shard(self.current_filename)
         self._current_writer = None
+        if self._listener is not None:
+            self._listener.close()
 
     def __enter__(self):
         self.next_shard()
