@@ -62,12 +62,12 @@ def twitter_scraping():
         with builder.build() as s:
             # Context manages things like files
             pass
-    except Exception as e:
-        if isinstance(e, KeyboardInterrupt):
-            sys.exit(1)
+    except KeyboardInterrupt:
+        return 1
+    except Exception:
         import traceback
         errmsg = "Exception was raised during run:\n{}".format(traceback.format_exc())
         _LOG.error(errmsg)
         emailer.send_text(message="The run ended in failure:\n{}".format(errmsg),
                           subject="[ERROR] {default_subject}")
-        sys.exit(1)
+        return 1
