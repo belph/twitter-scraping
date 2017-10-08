@@ -12,8 +12,8 @@ fmt = logging.Formatter("[%(levelname)s] %(name)s (%(asctime)s) - %(message)s")
 ch = logging.StreamHandler()
 ch.setFormatter(fmt)
 _LOG.addHandler(ch)
-_CONFIG_FILE = os.path.expanduser("~/.tweepy/config")
-_GMAIL_CONFIG = os.path.expanduser('~/.gmail-credentials')
+_TWITTER_CONFIG = os.path.expanduser("~/.twitter-scraping/twitter-credentials")
+_GMAIL_CONFIG = os.path.expanduser('~/.twitter-scraping/gmail-credentials')
 
 _USE_DEFAULT = object()
 
@@ -66,9 +66,9 @@ def get_auth():
     if __AUTH is not None:
         return __AUTH
     env_vars = set(['TWITTER_CONSUMER_KEY', 'TWITTER_CONSUMER_SECRET', 'TWITTER_ACCESS_TOKEN', 'TWITTER_ACCESS_TOKEN_SECRET'])
-    if os.path.exists(_CONFIG_FILE):
-        _LOG.info("Loading authentication information from configuration: {}".format(_CONFIG_FILE))
-        with open(_CONFIG_FILE) as f:
+    if os.path.exists(_TWITTER_CONFIG):
+        _LOG.info("Loading authentication information from configuration: {}".format(_TWITTER_CONFIG))
+        with open(_TWITTER_CONFIG) as f:
             cfg = json.loads(f.read())
     elif all(k in os.environ for k in env_vars):
         _LOG.info("Loading authentication information from the environment.")
@@ -99,14 +99,14 @@ def get_auth():
         cfg['access_token_secret'] = _prompt_nonempty("Twitter access token secret")
         prompted_any = True
     if prompted_any and _prompt_yes_no("Save configuration to a file for future use?", default=True):
-        if not os.path.exists(os.path.dirname(_CONFIG_FILE)):
-            os.makedirs(os.path.dirname(_CONFIG_FILE))
-        file_already_existed = os.path.exists(_CONFIG_FILE)
-        with open(_CONFIG_FILE, "w") as f:
+        if not os.path.exists(os.path.dirname(_TWITTER_CONFIG)):
+            os.makedirs(os.path.dirname(_TWITTER_CONFIG))
+        file_already_existed = os.path.exists(_TWITTER_CONFIG)
+        with open(_TWITTER_CONFIG, "w") as f:
             f.write(json.dumps(cfg))
         if not file_already_existed:
-            os.chmod(_CONFIG_FILE, 0o600)
-        _LOG.info("Authentication information written to configuration: {}".format(_CONFIG_FILE))
+            os.chmod(_TWITTER_CONFIG, 0o600)
+        _LOG.info("Authentication information written to configuration: {}".format(_TWITTER_CONFIG))
     auth = tweepy.OAuthHandler(cfg['key'], cfg['secret'])
     auth.set_access_token(cfg['access_token'], cfg['access_token_secret'])
     __AUTH = auth
@@ -131,6 +131,8 @@ def get_gmail_info():
         cfg['password'] = getpass.getpass("Gmail password: ")
         prompted_any = True
     if prompted_any and _prompt_yes_no("Save credentials to a file for future use?", default=True):
+        if not os.path.exists(os.path.dirname(_GMAIL_CONFIG)):
+            os.makedirs(os.path.dirname(_GMAIL_CONFIG))
         file_already_existed = os.path.exists(_GMAIL_CONFIG)
         with open(_GMAIL_CONFIG, "w") as f:
             f.write(json.dumps(cfg))
